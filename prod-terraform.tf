@@ -1,70 +1,104 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+# Configure the AWS Provider
 provider "aws" {
   region = "us-east-1"
-  access_key = "AKIAQ3EGVH3YS2JRDNJO"
-  secret_key = "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"
 }
 
-resource "aws_vpc" "shubh_vpc" {
-  cidr_block       = "10.0.0.0/16"
-  instance_tenancy = "default"
+resource "aws_vpc" "proj-vpc" {
+  cidr_block = "10.0.0.0/16"
+}
+
+resource "aws_internet_gateway" "gw" {
+  vpc_id = aws_vpc.proj-vpc.id
 
   tags = {
-    Name = "myvpc9"
+    Name = "gateway1"
   }
 }
 
-resource "aws_subnet" "mysubnet" {
-  vpc_id     = aws_vpc.shubh_vpc.id
-  cidr_block = "10.0.1.0/24"
-
-  tags = {
-    Name = "mysubnet9"
-  }
-}
-
-resource "aws_internet_gateway" "mygw" {
-  vpc_id = aws_vpc.shubh_vpc.id
-
-  tags = {
-    Name = "mygw9"
-  }
-}
-
-resource "aws_route_table" "myrt9" {
-  vpc_id = aws_vpc.shubh_vpc.id
+resource "aws_route_table" "proj-rt" {
+  vpc_id = aws_vpc.proj-vpc.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.mygw.id
+    gateway_id = aws_internet_gateway.gw.id
+  }
+
+  route {
+    ipv6_cidr_block        = "::/0"
+    egress_only_gateway_id = aws_egress_only_internet_gateway.gw.id
   }
 
   tags = {
-    Name = "myrt9"
+    Name = "rt1"
   }
 }
 
-resource "aws_route_table_association" "myrta9" {
-  subnet_id      = aws_subnet.mysubnet.id
-  route_table_id = aws_route_table.myrt9.id
+resource "aws_subnet" "proj-subnet" {
+  vpc_id     = aws_vpc.proj-vpc.id
+  cidr_block = "10.0.1.0/24"
+
+  tags = {
+    Name = "subnet1"
+  }
 }
 
-resource "aws_security_group" "mysg9" {
-  name        = "mysg9"
-  description = "Allow inbound traffic"
-  vpc_id      = aws_vpc.shubh_vpc.id
+resource "aws_route_table_association" "proj-sub-rt-asso" {
+  subnet_id      = aws_subnet.proj-subnet.id
+  route_table_id = aws_route_table.proj-rt.id
+}
+
+resource "aws_security_group" "proj-sg" {
+  name        = "proj-sg"
+  description = "Allow TLS inbound traffic and all outbound traffic"
+  vpc_id      = aws_vpc.proj-vpc.id
 
   ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    description = "SSH"
+    from_port   = 0
+    to_port     = 65000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
     from_port   = 22
     to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -78,22 +112,45 @@ resource "aws_security_group" "mysg9" {
   }
 
   tags = {
-    Name = "mysg9"
+    Name = "proj-sg1"
   }
 }
 
-resource "aws_instance" "instance9" {
-  ami                         = "ami-0a0e5d9c7acc336f1"
-  instance_type               = "t2.micro"
-  associate_public_ip_address = true
-  subnet_id                   = aws_subnet.mysubnet.id
-  vpc_security_group_ids      = [aws_security_group.mysg9.id]
-  key_name                    = "jenkins"  # Ensure this key pair exists
+resource "aws_network_interface" "proj-ni" {
+  subnet_id       = aws_subnet.proj-subnet.id
+  private_ips     = ["10.0.1.10"]  # Choose a valid IP within the subnet range
+  security_groups = [aws_security_group.proj-sg.id]
+}
+
+resource "aws_egress_only_internet_gateway" "gw" {
+  vpc_id = aws_vpc.proj-vpc.id
+}
+
+resource "aws_eip" "proj-eip" {
+  domain                  = "vpc"
+  network_interface       = aws_network_interface.proj-ni.id
+  associate_with_private_ip = "10.0.1.10"  # Make sure it matches the private IP of the network interface
+}
+
+resource "aws_instance" "prod-server" {
+  ami           = "ami-0c7217cdde317cfec"
+  instance_type = "t2.medium"
+  key_name      = "jenkins"
+
+  network_interface {
+    device_index          = 0
+    network_interface_id  = aws_network_interface.proj-ni.id
+  }
+
   user_data = <<-EOF
     #!/bin/bash
     sudo apt update -y
-   
+    sudo apt install docker.io -y
+    sudo service docker enable
+    sudo service docker start
+    sudo docker run -itd -p 8084:8081 moreaniket/insurance:1.0
   EOF
+
   tags = {
     Name = "prod-server"
   }
