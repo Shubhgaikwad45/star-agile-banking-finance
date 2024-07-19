@@ -16,7 +16,5 @@
       service:
         name: docker
         state: started
-    - name: delete all container
-      shell: docker rm $(docker ps -a -q)
     - name: create container
       command: sudo docker run -itd -p 8084:8081 shubhzz45/banking:1.0
