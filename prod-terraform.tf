@@ -148,7 +148,7 @@ resource "aws_instance" "prod-server" {
     sudo apt install docker.io -y
     sudo service docker enable
     sudo service docker start
-    sudo docker run -itd -p 8084:8081 moreaniket/insurance:1.0
+    sudo docker run -itd -p 8084:8081 shubhzz45/banking:1.0
   EOF
 
   tags = {
